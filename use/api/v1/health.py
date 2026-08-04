@@ -89,4 +89,25 @@ async def health_check() -> dict:
     response: dict = {"status": overall, "checks": checks}
     if catalog_stats:
         response["catalog"] = catalog_stats
+
+    # --- Pattern stats ---
+    if checks.get("postgres"):
+        try:
+            from use.db.postgres import AsyncSessionLocal
+            from sqlalchemy import text as _text
+
+            async with AsyncSessionLocal() as db:
+                total_patterns_res = await db.execute(_text("SELECT COUNT(*) FROM pattern_records"))
+                total_anomalies_res = await db.execute(_text("SELECT COUNT(*) FROM anomaly_flags"))
+                unack_res = await db.execute(
+                    _text("SELECT COUNT(*) FROM anomaly_flags WHERE acknowledged = FALSE")
+                )
+            response["patterns"] = {
+                "total_patterns": total_patterns_res.scalar(),
+                "total_anomalies": total_anomalies_res.scalar(),
+                "unacknowledged_anomalies": unack_res.scalar(),
+            }
+        except Exception as exc:
+            logger.warning("health: pattern stats failed: %s", exc)
+
     return response

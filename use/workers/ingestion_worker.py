@@ -29,6 +29,7 @@ settings = get_settings()
 INGEST_SUBJECT = "use.ingest.*"
 LAKEHOUSE_SUBJECT = "use.lakehouse.new"
 DLQ_SUBJECT = "use.ingest.dlq"
+PATTERN_ANALYZE_SUBJECT = "use.pattern.analyze"
 
 
 async def _handle_message(msg: Msg, bus: NatsBus) -> None:
@@ -59,6 +60,12 @@ async def _handle_message(msg: Msg, bus: NatsBus) -> None:
                 getattr(lakehouse, "use_doc_id", "unknown"),
                 graph_exc,
             )
+
+        # Fire-and-forget: trigger pattern analysis (best-effort, never blocks)
+        try:
+            await bus.publish(PATTERN_ANALYZE_SUBJECT, {"trigger": "ingestion"})
+        except Exception as pat_exc:
+            logger.warning("IngestionWorker: failed to publish pattern analyze trigger: %s", pat_exc)
 
         summary = {
             "use_doc_id": str(lakehouse.use_doc_id),

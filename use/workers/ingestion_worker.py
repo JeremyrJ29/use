@@ -21,6 +21,7 @@ from use.config import get_settings
 from use.db.postgres import AsyncSessionLocal
 from use.models.ingestion import IngestionRecord
 from use.services import structuring
+from use.services import graph_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -46,6 +47,18 @@ async def _handle_message(msg: Msg, bus: NatsBus) -> None:
         async with AsyncSessionLocal() as db:
             async with db.begin():
                 lakehouse = await structuring.process(record, db)
+
+        # Build graph (best-effort — never blocks ingestion)
+        try:
+            async with AsyncSessionLocal() as db:
+                async with db.begin():
+                    await graph_service.build_from_document(lakehouse, db)
+        except Exception as graph_exc:
+            logger.warning(
+                "IngestionWorker: graph build failed for doc=%s: %s",
+                getattr(lakehouse, "use_doc_id", "unknown"),
+                graph_exc,
+            )
 
         summary = {
             "use_doc_id": str(lakehouse.use_doc_id),

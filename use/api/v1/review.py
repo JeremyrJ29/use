@@ -4,14 +4,18 @@ import json
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 from use.db.postgres import get_db
 from use.models.review import ReviewItem
+from use.services import graph_service
 
 router = APIRouter()
 
@@ -89,6 +93,39 @@ async def _write_audit(action: str, entity_id: str, user_id: str | None, detail:
             "detail": json.dumps(detail),
         },
     )
+
+
+@router.post("/anomalies/{anomaly_id}/acknowledge", tags=["review"])
+async def acknowledge_anomaly(
+    anomaly_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Acknowledge an anomaly: mark edge acknowledged + review_item approved."""
+    row = await db.execute(
+        text("SELECT id, payload, status FROM review_items WHERE id = :id AND queue = 'anomaly'"),
+        {"id": str(anomaly_id)},
+    )
+    item = row.mappings().first()
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Anomaly review item {anomaly_id} not found")
+    if item["status"] == "approved":
+        return JSONResponse({"message": "Already acknowledged", "id": str(anomaly_id)})
+
+    payload = dict(item["payload"] or {})
+    edge_id = payload.get("contradicts_edge_id")
+
+    if edge_id:
+        await graph_service.acknowledge_edge(edge_id, db)
+
+    await db.execute(
+        text("UPDATE review_items SET status = 'approved', reviewed_at = NOW() WHERE id = :id"),
+        {"id": str(anomaly_id)},
+    )
+    await _write_audit(
+        "acknowledge_anomaly", str(anomaly_id), None,
+        {"edge_id": edge_id}, db,
+    )
+    return JSONResponse({"acknowledged": True, "id": str(anomaly_id), "edge_id": edge_id})
 
 
 # ---------------------------------------------------------------------------

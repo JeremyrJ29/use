@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}USE — Dashboard{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<div id="errors"></div>
+
+<h2>System Health</h2>
+<div id="stats-grid" class="stats-grid">
+  <div class="stat-card"><div class="stat-value" id="stat-entities">…</div><div class="stat-label">Total Entities</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-confirmed">…</div><div class="stat-label">Confirmed</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-patterns">…</div><div class="stat-label">Patterns</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-anomalies">…</div><div class="stat-label">Unacked Anomalies</div></div>
+</div>
+
+<h2>Review Queues</h2>
+<div id="queue-grid" class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-value" id="q-dict">…</div>
+    <div class="stat-label">Dict</div>
+    <a href="/ui/review?queue=dict" class="btn btn-primary btn-sm" style="margin-top:.5rem">Go to Review</a>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="q-graph">…</div>
+    <div class="stat-label">Graph</div>
+    <a href="/ui/review?queue=graph" class="btn btn-primary btn-sm" style="margin-top:.5rem">Go to Review</a>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="q-anomaly">…</div>
+    <div class="stat-label">Anomaly</div>
+    <a href="/ui/review?queue=anomaly" class="btn btn-primary btn-sm" style="margin-top:.5rem">Go to Review</a>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="q-gap">…</div>
+    <div class="stat-label">Gap</div>
+    <a href="/ui/review?queue=gap" class="btn btn-primary btn-sm" style="margin-top:.5rem">Go to Review</a>
+  </div>
+</div>
+
+<h2>Recent Documents</h2>
+<div class="card">
+  <div id="recent-docs">Loading…</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+  const errBox = document.getElementById('errors');
+
+  // Health stats
+  try {
+    const h = await apiGet('/api/v1/health');
+    document.getElementById('stat-entities').textContent  = h.catalog?.total_entities ?? '—';
+    document.getElementById('stat-confirmed').textContent = h.catalog?.confirmed      ?? '—';
+    document.getElementById('stat-patterns').textContent  = h.patterns?.total_patterns ?? '—';
+    document.getElementById('stat-anomalies').textContent = h.patterns?.unacknowledged_anomalies ?? '—';
+  } catch (e) { showError(errBox, 'Health API: ' + e.message); }
+
+  // Queue counts
+  for (const q of ['dict','graph','anomaly','gap']) {
+    try {
+      const d = await apiGet(`/api/v1/review?queue=${q}&limit=1`);
+      document.getElementById(`q-${q}`).textContent = d.total ?? 0;
+    } catch (e) { document.getElementById(`q-${q}`).textContent = '?'; }
+  }
+
+  // Recent docs
+  const docsEl = document.getElementById('recent-docs');
+  try {
+    const d = await apiGet('/api/v1/documents?limit=5');
+    const docs = d.items ?? d.documents ?? d;
+    if (!docs.length) {
+      docsEl.innerHTML = '<p class="empty-msg">No documents yet.</p>';
+    } else {
+      const rows = docs.map(doc => `
+        <tr>
+          <td class="mono">${(doc.id ?? doc.document_id ?? '').toString().slice(0,8)}…</td>
+          <td>${doc.filename ?? doc.title ?? doc.name ?? '—'}</td>
+          <td>${doc.status ?? '—'}</td>
+          <td>${formatDate(doc.created_at ?? doc.ingested_at)}</td>
+        </tr>`).join('');
+      docsEl.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Filename</th><th>Status</th><th>Date</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+  } catch (e) {
+    docsEl.innerHTML = '';
+    showError(docsEl, 'Documents API: ' + e.message);
+  }
+})();
+</script>
+{% endblock %}

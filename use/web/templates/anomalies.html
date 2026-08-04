@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}USE — Anomalies{% endblock %}
+
+{% block content %}
+<h1>Anomalies</h1>
+
+<div id="errors"></div>
+
+<div class="form-row">
+  <select id="type-filter"><option value="">All types</option></select>
+  <span id="anomaly-count" style="color:#6c757d;font-size:.875rem"></span>
+</div>
+
+<div class="table-wrap">
+  <table id="anomaly-table">
+    <thead>
+      <tr>
+        <th>ID</th><th>Type</th><th>Severity</th><th>Acknowledged</th><th>Created</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="anomaly-body">
+      <tr><td colspan="6" class="empty-msg">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="load-more-wrap">
+  <button id="load-more-btn" class="btn btn-neutral" style="display:none">Load more</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  let currentPage = 1;
+  const PAGE_SIZE = 50;
+  let totalItems = 0;
+  let typeFilter = '';
+  let allTypes = new Set();
+
+  function buildUrl(page) {
+    let url = `/api/v1/anomalies?page=${page}&limit=${PAGE_SIZE}&sort=severity_desc`;
+    if (typeFilter) url += `&anomaly_type=${encodeURIComponent(typeFilter)}`;
+    return url;
+  }
+
+  async function loadPage(page, append) {
+    clearErrors(document.getElementById('errors'));
+    try {
+      const data = await apiGet(buildUrl(page));
+      const items = data.items ?? data.anomalies ?? (Array.isArray(data) ? data : []);
+      totalItems = data.total ?? items.length;
+      document.getElementById('anomaly-count').textContent =
+        `${totalItems} anomal${totalItems !== 1 ? 'ies' : 'y'}`;
+
+      const tbody = document.getElementById('anomaly-body');
+      if (!append) tbody.innerHTML = '';
+
+      if (!items.length) {
+        if (!append) tbody.innerHTML = `<tr><td colspan="6" class="empty-msg">No anomalies found.</td></tr>`;
+        document.getElementById('load-more-btn').style.display = 'none';
+        return;
+      }
+
+      items.forEach(item => {
+        allTypes.add(item.anomaly_type ?? item.type ?? '');
+        tbody.appendChild(buildRow(item));
+      });
+
+      populateTypes();
+
+      const loaded = (page - 1) * PAGE_SIZE + items.length;
+      document.getElementById('load-more-btn').style.display =
+        loaded < totalItems ? 'inline-block' : 'none';
+    } catch (e) {
+      showError(document.getElementById('errors'), 'Anomalies API: ' + e.message);
+    }
+  }
+
+  function populateTypes() {
+    const sel = document.getElementById('type-filter');
+    const existing = new Set(Array.from(sel.options).map(o => o.value));
+    allTypes.forEach(t => {
+      if (t && !existing.has(t)) {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        sel.appendChild(opt);
+      }
+    });
+  }
+
+  function buildRow(item) {
+    const id = item.id ?? item.anomaly_id ?? '';
+    const atype = item.anomaly_type ?? item.type ?? '—';
+    const severity = typeof item.severity === 'number' ? item.severity : 0;
+    const pct = Math.min(100, Math.max(0, severity * 100)).toFixed(0);
+    const ack = item.acknowledged ? badge('approved') : badge('pending');
+    const tr = document.createElement('tr');
+    tr.id = `arow-${id}`;
+    tr.innerHTML = `
+      <td class="mono">${String(id).slice(0,8)}…</td>
+      <td>${badge(atype)}</td>
+      <td>
+        <div class="severity-bar-wrap">
+          <div class="severity-bar-track"><div class="severity-bar-fill" style="width:${pct}%"></div></div>
+          <span style="font-size:.8rem">${severity.toFixed ? severity.toFixed(2) : severity}</span>
+        </div>
+      </td>
+      <td>${ack}</td>
+      <td>${formatDate(item.created_at)}</td>
+      <td>
+        ${!item.acknowledged ? `<button class="btn btn-neutral btn-sm" onclick="doAck('${id}')">Acknowledge</button>` : '<em style="color:#6c757d;font-size:.8rem">done</em>'}
+      </td>`;
+    return tr;
+  }
+
+  window.doAck = async function(id) {
+    try {
+      await apiPost(`/api/v1/anomalies/${id}/acknowledge`, {});
+      const tr = document.getElementById(`arow-${id}`);
+      if (tr) {
+        const ackTd = tr.querySelectorAll('td')[3];
+        if (ackTd) ackTd.innerHTML = badge('approved');
+        const actionsTd = tr.querySelectorAll('td')[5];
+        if (actionsTd) actionsTd.innerHTML = '<em style="color:#6c757d;font-size:.8rem">done</em>';
+      }
+    } catch (e) { showError(document.getElementById('errors'), 'Acknowledge failed: ' + e.message); }
+  };
+
+  document.getElementById('type-filter').addEventListener('change', e => {
+    typeFilter = e.target.value;
+    currentPage = 1;
+    loadPage(1, false);
+  });
+
+  document.getElementById('load-more-btn').addEventListener('click', () => {
+    currentPage++;
+    loadPage(currentPage, true);
+  });
+
+  loadPage(1, false);
+})();
+</script>
+{% endblock %}

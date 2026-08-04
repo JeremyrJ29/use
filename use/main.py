@@ -21,3 +21,4 @@ app.include_router(api_router)
 @app.get("/health", tags=["health"])
 async def health() -> dict:
     return {"status": "ok", "version": "0.1.0"}
+

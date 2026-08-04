@@ -9,6 +9,7 @@ from use.api.v1 import (
     patterns,
     review,
     reason,
+    health,
 )
 from use.api.v1.auth_dev import router as auth_router
 
@@ -23,3 +24,5 @@ api_router.include_router(graph.router, prefix="/api/v1", tags=["graph"])
 api_router.include_router(patterns.router, prefix="/api/v1", tags=["patterns"])
 api_router.include_router(review.router, prefix="/api/v1", tags=["review"])
 api_router.include_router(reason.router, prefix="/api/v1", tags=["reason"])
+api_router.include_router(health.router, prefix="/api/v1", tags=["health"])
+

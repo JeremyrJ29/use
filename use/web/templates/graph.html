@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}USE — Graph{% endblock %}
+
+{% block content %}
+<h1>Semantic Graph</h1>
+
+<div id="errors"></div>
+
+<h2>Summary</h2>
+<div id="graph-stats" class="stats-grid">
+  <div class="stat-card"><div class="stat-value" id="stat-nodes">…</div><div class="stat-label">Nodes</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-edges">…</div><div class="stat-label">Edges</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-confirmed-edges">…</div><div class="stat-label">Confirmed Edges</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-contradictions">…</div><div class="stat-label">Contradictions</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-gaps">…</div><div class="stat-label">Gaps</div></div>
+</div>
+
+<h2>Knowledge Gaps</h2>
+<div class="card">
+  <div id="gaps-table">Loading…</div>
+</div>
+
+<h2>Contradictions</h2>
+<div class="card">
+  <div id="contradictions-table">Loading…</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+  const errBox = document.getElementById('errors');
+
+  // Summary stats
+  try {
+    const s = await apiGet('/api/v1/graph/summary');
+    document.getElementById('stat-nodes').textContent           = s.total_nodes ?? '—';
+    document.getElementById('stat-edges').textContent           = s.total_edges ?? '—';
+    document.getElementById('stat-confirmed-edges').textContent = s.confirmed_edges ?? '—';
+    document.getElementById('stat-contradictions').textContent  = s.contradictions ?? '—';
+    document.getElementById('stat-gaps').textContent            = s.gaps ?? '—';
+  } catch (e) { showError(errBox, 'Graph summary: ' + e.message); }
+
+  // Gaps
+  const gapsEl = document.getElementById('gaps-table');
+  try {
+    const d = await apiGet('/api/v1/graph/gaps');
+    const items = d.items ?? d.gaps ?? d ?? [];
+    if (!items.length) {
+      gapsEl.innerHTML = '<p class="empty-msg">No knowledge gaps detected.</p>';
+    } else {
+      const rows = items.map(g => {
+        const eids = (g.entity_ids ?? []).join(', ') || '—';
+        return `<tr>
+          <td class="mono">${(g.id ?? '').slice(0,8)}…</td>
+          <td>${eids}</td>
+          <td>${g.edge_type ?? '—'}</td>
+          <td>${formatDate(g.created_at)}</td>
+          <td>
+            <button class="btn btn-primary btn-sm" onclick="confirmEdge('${g.id}', this)">Confirm</button>
+          </td>
+        </tr>`;
+      }).join('');
+      gapsEl.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>ID</th><th>Entity IDs</th><th>Edge Type</th><th>Detected</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+    }
+  } catch (e) {
+    gapsEl.innerHTML = '';
+    showError(gapsEl, 'Gaps API: ' + e.message);
+  }
+
+  // Contradictions
+  const contEl = document.getElementById('contradictions-table');
+  try {
+    const d = await apiGet('/api/v1/graph/contradictions');
+    const items = d.items ?? d.contradictions ?? d ?? [];
+    if (!items.length) {
+      contEl.innerHTML = '<p class="empty-msg">No contradictions detected.</p>';
+    } else {
+      const rows = items.map(c => {
+        const eids = (c.entity_ids ?? []).join(', ') || '—';
+        return `<tr>
+          <td class="mono">${(c.id ?? '').slice(0,8)}…</td>
+          <td>${eids}</td>
+          <td>${c.edge_type ?? '—'}</td>
+          <td>${formatDate(c.created_at)}</td>
+          <td>
+            <button class="btn btn-primary btn-sm" onclick="confirmEdge('${c.id}', this)">Confirm</button>
+          </td>
+        </tr>`;
+      }).join('');
+      contEl.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>ID</th><th>Entity IDs</th><th>Edge Type</th><th>Detected</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+    }
+  } catch (e) {
+    contEl.innerHTML = '';
+    showError(contEl, 'Contradictions API: ' + e.message);
+  }
+})();
+
+async function confirmEdge(edgeId, btn) {
+  if (!confirm('Confirm this edge? This will promote it to human_confirmed and trigger re-analysis.')) return;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    await apiPost(`/api/v1/graph/confirm/${edgeId}`, {});
+    btn.textContent = '✓ Confirmed';
+    btn.classList.remove('btn-primary');
+    btn.classList.add('btn-success');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Confirm';
+    alert('Error: ' + e.message);
+  }
+}
+</script>
+{% endblock %}

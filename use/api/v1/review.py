@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from use.db.postgres import get_db
 from use.models.review import ReviewItem
 from use.services import graph_service
+from use.services import improvement_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -209,7 +214,23 @@ async def approve_review_item(
     updated = await db.execute(
         text("SELECT * FROM review_items WHERE id = :id"), {"id": review_id}
     )
-    return _row_to_review(updated.mappings().one())
+    approved_row = _row_to_review(updated.mappings().one())
+
+    # Kick off improvement loop in background — never blocks the response
+    row_dict = _row_to_review(row)
+
+    async def _run_improvement() -> None:
+        try:
+            from use.db.postgres import AsyncSessionLocal
+            async with AsyncSessionLocal() as imp_db:
+                async with imp_db.begin():
+                    await improvement_service.route_improvement(row_dict, imp_db)
+        except Exception as exc:
+            logger.warning("improvement task failed for review_item=%s: %s", review_id, exc)
+
+    asyncio.create_task(_run_improvement())
+
+    return approved_row
 
 
 @router.post("/review/{review_id}/reject", tags=["review"])

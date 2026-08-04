@@ -42,6 +42,11 @@
 <div class="card">
   <div id="recent-docs">Loading…</div>
 </div>
+
+<h2>Recent Improvements <a href="/ui/improvement" class="btn btn-primary btn-sm" style="margin-left:1rem;vertical-align:middle">View All</a></h2>
+<div class="card">
+  <div id="recent-improvements">Loading…</div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -92,6 +97,33 @@
   } catch (e) {
     docsEl.innerHTML = '';
     showError(docsEl, 'Documents API: ' + e.message);
+  }
+  // Recent improvements
+  const impEl = document.getElementById('recent-improvements');
+  try {
+    const d = await apiGet('/api/v1/improvement?limit=5');
+    const items = d.items ?? [];
+    if (!items.length) {
+      impEl.innerHTML = '<p class="empty-msg">No improvements recorded yet.</p>';
+    } else {
+      const rows = items.map(i => {
+        const docCount = Array.isArray(i.affected_doc_ids) ? i.affected_doc_ids.length : 0;
+        const badge = i.status === 'complete' ? 'badge-success' : i.status === 'failed' ? 'badge-error' : 'badge-warning';
+        return `<tr>
+          <td>${i.trigger_type ?? '—'}</td>
+          <td>${docCount}</td>
+          <td><span class="badge ${badge}">${i.status ?? '—'}</span></td>
+          <td>${formatDate(i.completed_at ?? i.created_at)}</td>
+        </tr>`;
+      }).join('');
+      impEl.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>Trigger</th><th>Docs Affected</th><th>Status</th><th>Completed</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+    }
+  } catch (e) {
+    impEl.innerHTML = '';
+    showError(impEl, 'Improvement API: ' + e.message);
   }
 })();
 </script>

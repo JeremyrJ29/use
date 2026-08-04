@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from use.models.ingestion import IngestionRecord
 from use.models.lakehouse import GraphLayerRef, LakehouseRecord, MDLayerContent
+from use.services import catalog_service as _catalog
 from use.services.dict_service import lookup as _dict_lookup, auto_detect_and_queue as _auto_detect
 from use.services.schema_templates import SchemaTemplate, select_template
 
@@ -236,6 +237,7 @@ def build_md_document(
     template: SchemaTemplate,
     record: IngestionRecord,
     doc_id: uuid.UUID,
+    entity_tags: list[str] | None = None,
 ) -> str:
     """Produce a fully-formed MD Layer document as a Markdown string."""
     ext = resolved.extraction
@@ -245,6 +247,9 @@ def build_md_document(
     tags = [record.source_type, template.name]
     if record.metadata.get("origin"):
         tags.append("ingested")
+    # Inject entity cross-reference tags
+    if entity_tags:
+        tags.extend(entity_tags)
 
     flags_list = ext.flags
     tags_yaml = "[" + ", ".join(tags) + "]"
@@ -440,10 +445,48 @@ async def process(record: IngestionRecord, db: AsyncSession) -> LakehouseRecord:
     # Step 4 — Dict resolution
     resolved = await resolve_entities(extraction, db=db, source_id=record.source_id)
 
+    # Step 4b — Catalog upsert for every resolved entity
+    entity_tags: list[str] = []
+    for entity in resolved.extraction.entities:
+        canonical = resolved.entity_labels.get(entity.text, "UNKNOWN")
+        if canonical == "UNKNOWN":
+            # Unknown entities get their own catalog entry
+            canon_id = f"unknown:{entity.text.lower().replace(' ', '_')}"
+            try:
+                await _catalog.upsert_entity(
+                    canonical_id=canon_id,
+                    entity_type="unknown",
+                    display_name=entity.text,
+                    aliases=[entity.text],
+                    source_id=record.source_id,
+                    document_id=str(doc_id),
+                    confidence=0.5,
+                    db=db,
+                )
+                entity_tags.append(f"entity:{canon_id}")
+            except Exception as exc:
+                logger.warning("catalog upsert failed for unknown entity %s: %s", entity.text, exc)
+        else:
+            conf = entity.confidence if entity.confidence >= 0.7 else 0.7
+            try:
+                await _catalog.upsert_entity(
+                    canonical_id=canonical,
+                    entity_type=entity.entity_type_hint.lower(),
+                    display_name=entity.text,
+                    aliases=[entity.text],
+                    source_id=record.source_id,
+                    document_id=str(doc_id),
+                    confidence=conf,
+                    db=db,
+                )
+                entity_tags.append(f"entity:{canonical}")
+            except Exception as exc:
+                logger.warning("catalog upsert failed for %s: %s", canonical, exc)
+
     # Step 5 — Template already selected above
 
     # Step 6 — Build MD document
-    md_content = build_md_document(resolved, template, record, doc_id)
+    md_content = build_md_document(resolved, template, record, doc_id, entity_tags=entity_tags)
 
     # Step 7 — Graph stubs
     graph_ref = build_graph_stubs(resolved)

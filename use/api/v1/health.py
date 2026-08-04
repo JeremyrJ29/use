@@ -67,5 +67,26 @@ async def health_check() -> dict:
         logger.warning("health: nats check failed: %s", exc)
         checks["nats"] = False
 
+    # --- Catalog stats ---
+    catalog_stats: dict = {}
+    if checks.get("postgres"):
+        try:
+            from use.db.postgres import AsyncSessionLocal
+            from use.services import catalog_service
+
+            async with AsyncSessionLocal() as db:
+                stats = await catalog_service.compute_catalog_stats(db)
+            catalog_stats = {
+                "total_entities": stats["total_entities"],
+                "confirmed": stats["confirmed_count"],
+                "unconfirmed": stats["unconfirmed_count"],
+            }
+        except Exception as exc:
+            logger.warning("health: catalog stats failed: %s", exc)
+            catalog_stats = {}
+
     overall = "ok" if all(checks.values()) else "degraded"
-    return {"status": overall, "checks": checks}
+    response: dict = {"status": overall, "checks": checks}
+    if catalog_stats:
+        response["catalog"] = catalog_stats
+    return response

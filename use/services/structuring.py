@@ -29,12 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from use.models.ingestion import IngestionRecord
 from use.models.lakehouse import GraphLayerRef, LakehouseRecord, MDLayerContent
-from use.services.dict_service import DictService
+from use.services.dict_service import lookup as _dict_lookup, auto_detect_and_queue as _auto_detect
 from use.services.schema_templates import SchemaTemplate, select_template
 
 logger = logging.getLogger(__name__)
-
-_dict_service = DictService()
 
 
 # ---------------------------------------------------------------------------
@@ -179,16 +177,57 @@ async def extract_semantic_content(
     return result
 
 
-async def resolve_entities(extraction: ExtractionResult) -> ResolvedExtraction:
-    """Lookup each entity mention in DictService; flag as [UNKNOWN] when not found."""
+async def resolve_entities(
+    extraction: ExtractionResult,
+    db: AsyncSession | None = None,
+    source_id: str = "",
+) -> ResolvedExtraction:
+    """
+    Lookup each entity mention in DictService; flag as [UNKNOWN] when not found.
+
+    When *db* is provided the full lookup algorithm runs and unknown terms are
+    queued for human review via auto_detect_and_queue.
+    Without *db* (legacy / test path) all entities resolve to UNKNOWN.
+    """
     labels: dict[str, str] = {}
     for entity in extraction.entities:
-        entries = await _dict_service.lookup(entity.text)
-        if entries:
-            labels[entity.text] = entries[0].canonical_id
+        if db is not None:
+            results = await _dict_lookup(
+                entity.text, domain=None, db=db
+            )
+        else:
+            results = []
+
+        if results:
+            best = results[0]
+            if best.confidence >= 0.7:
+                labels[entity.text] = best.canonical_id
+            elif best.confidence >= 0.5:
+                # Ambiguous — keep top-3 candidates for the flag
+                top3 = [r.canonical_id for r in results[:3]]
+                labels[entity.text] = best.canonical_id
+                extraction.flags.append(
+                    f"[AMBIGUOUS: {entity.text} | candidates: {', '.join(top3)}]"
+                )
+                if db is not None:
+                    await _auto_detect(
+                        entity.text, context=source_id, source_id=source_id, db=db
+                    )
+            else:
+                labels[entity.text] = "UNKNOWN"
+                extraction.flags.append(f"[UNKNOWN: {entity.text}]")
+                if db is not None:
+                    await _auto_detect(
+                        entity.text, context=source_id, source_id=source_id, db=db
+                    )
         else:
             labels[entity.text] = "UNKNOWN"
             extraction.flags.append(f"[UNKNOWN: {entity.text}]")
+            if db is not None:
+                await _auto_detect(
+                    entity.text, context=source_id, source_id=source_id, db=db
+                )
+
     return ResolvedExtraction(extraction=extraction, entity_labels=labels)
 
 
@@ -399,7 +438,7 @@ async def process(record: IngestionRecord, db: AsyncSession) -> LakehouseRecord:
     extraction = await extract_semantic_content(structured, record.source_type, template)
 
     # Step 4 — Dict resolution
-    resolved = await resolve_entities(extraction)
+    resolved = await resolve_entities(extraction, db=db, source_id=record.source_id)
 
     # Step 5 — Template already selected above
 

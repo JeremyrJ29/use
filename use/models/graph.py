@@ -12,6 +12,7 @@ class GraphNode(BaseModel):
     node_type: Literal["Entity", "Event", "Fact", "Document", "Concept"]
     canonical_id: str | None = None
     properties: dict[str, Any] = Field(default_factory=dict)
+    source_doc_id: UUID | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -26,4 +27,6 @@ class GraphEdge(BaseModel):
     layer: Literal["factual", "inferred", "human_confirmed"]
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     properties: dict[str, Any] = Field(default_factory=dict)
+    source_doc_id: UUID | None = None
+    acknowledged: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -36,3 +36,13 @@ async def anomalies(request: Request) -> HTMLResponse:
 @router.get("/ui/patterns", response_class=HTMLResponse, include_in_schema=False)
 async def patterns(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("patterns.html", {"request": request})
+
+
+@router.get("/ui/graph", response_class=HTMLResponse, include_in_schema=False)
+async def graph(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("graph.html", {"request": request})
+
+
+@router.get("/ui/improvement", response_class=HTMLResponse, include_in_schema=False)
+async def improvement(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("improvement.html", {"request": request})

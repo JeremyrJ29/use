@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}USE — Improvement Log{% endblock %}
+
+{% block content %}
+<h1>Continuous Improvement Log</h1>
+
+<div id="errors"></div>
+
+<h2>Stats</h2>
+<div id="stats-grid" class="stats-grid">
+  <div class="stat-card"><div class="stat-value" id="stat-total">…</div><div class="stat-label">Total Improvements</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-dict">…</div><div class="stat-label">Dict Approvals</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-catalog">…</div><div class="stat-label">Catalog Confirms</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-graph">…</div><div class="stat-label">Graph Confirms</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-anomaly">…</div><div class="stat-label">Anomaly Acks</div></div>
+  <div class="stat-card"><div class="stat-value" id="stat-complete">…</div><div class="stat-label">Completed</div></div>
+</div>
+
+<h2>Improvement Log</h2>
+<div class="card">
+  <div id="log-table">Loading…</div>
+</div>
+
+<h2>Admin</h2>
+<div class="card">
+  <p>Re-process all documents with latest Dict/Catalog/Graph knowledge. This runs in the background and may take several minutes for large datasets.</p>
+  <button id="btn-reindex" class="btn btn-primary">Run Full Reindex</button>
+  <div id="reindex-result" style="margin-top:1rem"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+  const errBox = document.getElementById('errors');
+
+  // Stats
+  try {
+    const s = await apiGet('/api/v1/improvement/stats');
+    document.getElementById('stat-total').textContent  = s.total ?? 0;
+    const bt = s.by_trigger_type ?? {};
+    document.getElementById('stat-dict').textContent    = bt.dict_approval ?? 0;
+    document.getElementById('stat-catalog').textContent = (bt.catalog_confirm ?? 0) + (bt.ontology ?? 0);
+    document.getElementById('stat-graph').textContent   = bt.graph_confirm ?? 0;
+    document.getElementById('stat-anomaly').textContent = bt.anomaly_acknowledge ?? 0;
+    const bs = s.by_status ?? {};
+    document.getElementById('stat-complete').textContent = bs.complete ?? 0;
+  } catch (e) { showError(errBox, 'Stats API: ' + e.message); }
+
+  // Log table
+  const logEl = document.getElementById('log-table');
+  try {
+    const d = await apiGet('/api/v1/improvement?limit=100');
+    const items = d.items ?? [];
+    if (!items.length) {
+      logEl.innerHTML = '<p class="empty-msg">No improvement records yet. Approving a review item will trigger the first one.</p>';
+    } else {
+      const rows = items.map(i => {
+        const docCount = Array.isArray(i.affected_doc_ids) ? i.affected_doc_ids.length : 0;
+        const shortId = (i.id ?? '').slice(0, 8) + '…';
+        const badge = i.status === 'complete' ? 'badge-success' : i.status === 'failed' ? 'badge-error' : 'badge-warning';
+        let duration = '—';
+        if (i.started_at && i.completed_at) {
+          const ms = new Date(i.completed_at) - new Date(i.started_at);
+          duration = ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's';
+        }
+        return `<tr>
+          <td class="mono">${shortId}</td>
+          <td>${i.trigger_type ?? '—'}</td>
+          <td>${docCount}</td>
+          <td><span class="badge ${badge}">${i.status ?? '—'}</span></td>
+          <td>${duration}</td>
+          <td>${formatDate(i.created_at)}</td>
+        </tr>`;
+      }).join('');
+      logEl.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>ID</th><th>Trigger Type</th><th>Docs Affected</th><th>Status</th><th>Duration</th><th>Created</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+    }
+  } catch (e) {
+    logEl.innerHTML = '';
+    showError(logEl, 'Log API: ' + e.message);
+  }
+})();
+
+// Reindex button
+document.getElementById('btn-reindex').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-reindex');
+  const resultEl = document.getElementById('reindex-result');
+  if (!confirm('Run full reindex? This will re-process ALL documents with updated knowledge. Continue?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Queuing…';
+  try {
+    const d = await apiPost('/api/v1/improvement/reindex', {});
+    resultEl.innerHTML = `<p class="success-msg">✓ ${d.message ?? 'Reindex queued'} (${d.job_count ?? 0} documents)</p>`;
+  } catch (e) {
+    resultEl.innerHTML = `<p class="error-msg">Error: ${e.message}</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run Full Reindex';
+  }
+});
+</script>
+{% endblock %}

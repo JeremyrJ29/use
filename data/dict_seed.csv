@@ -1,0 +1,21 @@
+canonical_id,term,entry_type,aliases,domain,definition
+machine,Machine,entity,equipment|asset|device|unit,manufacturing,A physical production asset or piece of equipment on the shop floor.
+operator,Operator,entity,worker|technician|user|person,manufacturing,A human worker who interacts with machines or processes.
+product,Product,entity,part|item|sku|good,manufacturing,A finished or semi-finished item produced by a manufacturing process.
+process,Process,process_step,operation|step|procedure|workflow,manufacturing,A defined sequence of actions that transforms inputs into outputs.
+location,Location,entity,site|area|zone|cell|line,manufacturing,A physical place such as a factory floor area, cell, or production line.
+shift,Shift,entity,work_shift|shift_window|period,manufacturing,A defined time period during which a group of workers operates.
+defect,Defect,concept,nonconformance|nc|fault|flaw|anomaly,manufacturing,A quality issue where a product does not meet specification.
+rework,Rework,process_step,repair|correction|redo,manufacturing,The process of correcting a defective product so it meets specification.
+downtime,Downtime,concept,stoppage|outage|breakdown|idle_time,manufacturing,A period during which a machine or process is not producing output.
+throughput,Throughput,value,output_rate|production_rate|yield|takt,manufacturing,The rate at which a system produces or processes units over time.
+timestamp,Timestamp,concept,datetime|time|event_time|ts,general,A point in time recorded as an ISO-8601 date-time string.
+status,Status,vocabulary,state|condition|flag,general,The current condition or state of an entity or process.
+id,ID,abbreviation,identifier|key|pk|uuid,general,A unique identifier for a record or entity.
+name,Name,entity,label|title|display_name,general,A human-readable name or label for an entity.
+type,Type,vocabulary,category|kind|class,general,The classification or category of an entity.
+sensor,Sensor,entity,probe|detector|transducer|iot_device,manufacturing,A device that measures a physical quantity and produces a signal.
+maintenance,Maintenance,process_step,pm|planned_maintenance|service|upkeep,manufacturing,Scheduled or reactive activities to keep equipment in operating condition.
+batch,Batch,entity,lot|run|production_batch,manufacturing,A group of products produced together under the same conditions.
+cycle_time,Cycle Time,value,ct|takt_time|processing_time,manufacturing,The time taken to complete one unit of production from start to finish.
+oee,OEE,abbreviation,overall_equipment_effectiveness|availability_performance_quality,manufacturing,Overall Equipment Effectiveness: a composite measure of manufacturing productivity.

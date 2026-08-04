@@ -1,6 +1,8 @@
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from use.api.router import api_router
 
@@ -16,6 +18,9 @@ app = FastAPI(
 )
 
 app.include_router(api_router)
+
+_STATIC_DIR = Path(__file__).parent / "web" / "static"
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/health", tags=["health"])

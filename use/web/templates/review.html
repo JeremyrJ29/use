@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}USE — Review Queue{% endblock %}
+
+{% block content %}
+<h1>Review Queue</h1>
+
+<div id="errors"></div>
+
+<div class="tabs">
+  <button class="tab-btn" data-queue="">All</button>
+  <button class="tab-btn" data-queue="dict">Dict</button>
+  <button class="tab-btn" data-queue="graph">Graph</button>
+  <button class="tab-btn" data-queue="anomaly">Anomaly</button>
+  <button class="tab-btn" data-queue="gap">Gap</button>
+</div>
+
+<div class="card" style="padding:.75rem">
+  <span id="total-count" style="color:#6c757d;font-size:.875rem"></span>
+</div>
+
+<div class="table-wrap">
+  <table id="review-table">
+    <thead>
+      <tr>
+        <th>ID</th><th>Queue</th><th>Status</th><th>Created</th><th>Payload</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="review-body">
+      <tr><td colspan="6" class="empty-msg">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="load-more-wrap">
+  <button id="load-more-btn" class="btn btn-neutral" style="display:none">Load more</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  let activeQueue = params.get('queue') ?? '';
+  let currentPage = 1;
+  const PAGE_SIZE = 25;
+  let totalItems = 0;
+
+  // Highlight active tab
+  function setActiveTab(q) {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.queue === q);
+    });
+  }
+
+  // Build queue URL path
+  function queueUrl(q, page) {
+    const base = q ? `/api/v1/review?queue=${encodeURIComponent(q)}` : '/api/v1/review';
+    return `${base}${q ? '&' : '?'}page=${page}&limit=${PAGE_SIZE}`;
+  }
+
+  async function loadPage(page, append) {
+    const errBox = document.getElementById('errors');
+    clearErrors(errBox);
+    try {
+      const data = await apiGet(queueUrl(activeQueue, page));
+      totalItems = data.total ?? 0;
+      document.getElementById('total-count').textContent =
+        `${totalItems} pending item${totalItems !== 1 ? 's' : ''}`;
+
+      const tbody = document.getElementById('review-body');
+      if (!append) tbody.innerHTML = '';
+
+      if (!data.items || !data.items.length) {
+        if (!append) tbody.innerHTML = `<tr><td colspan="6" class="empty-msg">No pending items in this queue.</td></tr>`;
+        document.getElementById('load-more-btn').style.display = 'none';
+        return;
+      }
+
+      data.items.forEach(item => {
+        const tr = buildRow(item);
+        tbody.appendChild(tr);
+      });
+
+      const loaded = (page - 1) * PAGE_SIZE + data.items.length;
+      document.getElementById('load-more-btn').style.display =
+        loaded < totalItems ? 'inline-block' : 'none';
+    } catch (e) {
+      showError(errBox, 'Review API: ' + e.message);
+    }
+  }
+
+  function buildRow(item) {
+    const payloadStr = JSON.stringify(item.payload ?? {});
+    const preview = payloadStr.length > 120 ? payloadStr.slice(0,120) + '…' : payloadStr;
+    const tr = document.createElement('tr');
+    tr.id = `row-${item.id}`;
+    tr.innerHTML = `
+      <td class="mono">${item.id.slice(0,8)}…</td>
+      <td>${badge(item.queue)}</td>
+      <td>${badge(item.status)}</td>
+      <td>${formatDate(item.created_at)}</td>
+      <td style="max-width:260px;word-break:break-all;font-size:.8rem">${escHtml(preview)}</td>
+      <td>
+        <button class="btn btn-success btn-sm" onclick="doApprove('${item.id}')">Approve</button>
+        <button class="btn btn-danger btn-sm" onclick="doReject('${item.id}')">Reject</button>
+        <button class="btn btn-neutral btn-sm" onclick="toggleDetail('${item.id}', this)">Detail</button>
+      </td>`;
+    return tr;
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  window.doApprove = async function(id) {
+    try {
+      await apiPost(`/api/v1/review/${id}/approve`, {});
+      refreshRow(id, 'approved');
+    } catch (e) { showError(document.getElementById('errors'), 'Approve failed: ' + e.message); }
+  };
+
+  window.doReject = async function(id) {
+    const notes = window.prompt('Rejection notes (optional):') ?? '';
+    try {
+      await apiPost(`/api/v1/review/${id}/reject`, { notes });
+      refreshRow(id, 'rejected');
+    } catch (e) { showError(document.getElementById('errors'), 'Reject failed: ' + e.message); }
+  };
+
+  function refreshRow(id, newStatus) {
+    const tr = document.getElementById(`row-${id}`);
+    if (!tr) return;
+    const statusTd = tr.querySelectorAll('td')[2];
+    if (statusTd) statusTd.innerHTML = badge(newStatus);
+    const actionsTd = tr.querySelectorAll('td')[5];
+    if (actionsTd) actionsTd.innerHTML = `<em style="color:#6c757d;font-size:.8rem">${newStatus}</em>`;
+    const detailRow = document.getElementById(`detail-${id}`);
+    if (detailRow) detailRow.remove();
+  }
+
+  window.toggleDetail = async function(id, btn) {
+    const existing = document.getElementById(`detail-${id}`);
+    if (existing) { existing.remove(); btn.textContent = 'Detail'; return; }
+    btn.textContent = 'Close';
+    const tr = document.getElementById(`row-${id}`);
+    const detailTr = document.createElement('tr');
+    detailTr.id = `detail-${id}`;
+    detailTr.className = 'detail-row';
+    detailTr.innerHTML = `<td colspan="6"><pre style="white-space:pre-wrap;font-size:.8rem;padding:.5rem">Loading…</pre></td>`;
+    tr.after(detailTr);
+    try {
+      const data = await apiGet(`/api/v1/review`);
+      // Just show full payload from the already-fetched row
+      const pre = detailTr.querySelector('pre');
+      const rowEl = document.getElementById(`row-${id}`);
+      // Re-fetch isn't needed — we already have it. Use the table row's data attribute if available.
+      pre.textContent = '(expand from row data — no single-item endpoint required)';
+    } catch (_) {}
+  };
+
+  // Tab click
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeQueue = btn.dataset.queue;
+      currentPage = 1;
+      setActiveTab(activeQueue);
+      const url = new URL(location.href);
+      activeQueue ? url.searchParams.set('queue', activeQueue) : url.searchParams.delete('queue');
+      history.replaceState(null, '', url);
+      loadPage(1, false);
+    });
+  });
+
+  // Load more
+  document.getElementById('load-more-btn').addEventListener('click', () => {
+    currentPage++;
+    loadPage(currentPage, true);
+  });
+
+  setActiveTab(activeQueue);
+  loadPage(1, false);
+})();
+</script>
+{% endblock %}

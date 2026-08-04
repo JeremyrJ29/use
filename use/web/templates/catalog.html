@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}USE — Catalog{% endblock %}
+
+{% block content %}
+<h1>Catalog</h1>
+
+<div id="errors"></div>
+
+<div class="form-row">
+  <input type="search" id="search-input" placeholder="Search entities…" style="flex:1;min-width:200px" />
+  <select id="type-filter"><option value="">All types</option></select>
+  <span id="catalog-count" style="color:#6c757d;font-size:.875rem"></span>
+</div>
+
+<div class="table-wrap">
+  <table id="catalog-table">
+    <thead>
+      <tr>
+        <th>Canonical ID</th><th>Display Name</th><th>Type</th>
+        <th>Occurrences</th><th>Confidence</th><th>Status</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="catalog-body">
+      <tr><td colspan="7" class="empty-msg">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="load-more-wrap">
+  <button id="load-more-btn" class="btn btn-neutral" style="display:none">Load more</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  let currentPage = 1;
+  const PAGE_SIZE = 50;
+  let totalItems = 0;
+  let searchQuery = '';
+  let typeFilter = '';
+  let debounceTimer;
+
+  // Populate type dropdown
+  (async () => {
+    try {
+      const data = await apiGet('/api/v1/catalog/stats');
+      const types = data.entity_types ?? data.by_type ?? [];
+      const sel = document.getElementById('type-filter');
+      const typeList = Array.isArray(types) ? types : Object.keys(types);
+      typeList.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        sel.appendChild(opt);
+      });
+    } catch (_) {}
+  })();
+
+  function buildUrl(page) {
+    if (searchQuery) {
+      return `/api/v1/catalog/search?q=${encodeURIComponent(searchQuery)}&limit=${PAGE_SIZE}`;
+    }
+    let url = `/api/v1/catalog?page=${page}&limit=${PAGE_SIZE}`;
+    if (typeFilter) url += `&entity_type=${encodeURIComponent(typeFilter)}`;
+    return url;
+  }
+
+  async function loadPage(page, append) {
+    clearErrors(document.getElementById('errors'));
+    try {
+      const data = await apiGet(buildUrl(page));
+      totalItems = data.total ?? data.items?.length ?? 0;
+      document.getElementById('catalog-count').textContent =
+        searchQuery ? `${data.items?.length ?? 0} results` : `${totalItems} entities`;
+
+      const tbody = document.getElementById('catalog-body');
+      if (!append) tbody.innerHTML = '';
+
+      const items = data.items ?? [];
+      if (!items.length) {
+        if (!append) tbody.innerHTML = `<tr><td colspan="7" class="empty-msg">No entities found.</td></tr>`;
+        document.getElementById('load-more-btn').style.display = 'none';
+        return;
+      }
+
+      items.forEach(e => tbody.appendChild(buildRow(e)));
+
+      const loaded = searchQuery ? items.length : (page - 1) * PAGE_SIZE + items.length;
+      document.getElementById('load-more-btn').style.display =
+        !searchQuery && loaded < totalItems ? 'inline-block' : 'none';
+    } catch (e) {
+      showError(document.getElementById('errors'), 'Catalog API: ' + e.message);
+    }
+  }
+
+  function buildRow(e) {
+    const confirmed = e.confirmed ? 'confirmed' : 'unconfirmed';
+    const conf = typeof e.confidence === 'number' ? (e.confidence * 100).toFixed(0) + '%' : '—';
+    const tr = document.createElement('tr');
+    tr.id = `crow-${e.canonical_id}`;
+    tr.innerHTML = `
+      <td class="mono">${escHtml(e.canonical_id?.slice(0,16) ?? '—')}…</td>
+      <td>${escHtml(e.display_name ?? '—')}</td>
+      <td>${escHtml(e.entity_type ?? '—')}</td>
+      <td>${e.occurrence_count ?? 0}</td>
+      <td>${conf}</td>
+      <td>${badge(confirmed)}</td>
+      <td>
+        <button class="btn btn-neutral btn-sm" onclick="toggleCatalogDetail('${escHtml(e.canonical_id)}', this)">Detail</button>
+        ${!e.confirmed ? `<button class="btn btn-success btn-sm" onclick="doConfirm('${escHtml(e.canonical_id)}')">Confirm</button>` : ''}
+      </td>`;
+    tr.style.cursor = 'pointer';
+    return tr;
+  }
+
+  function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  window.doConfirm = async function(id) {
+    try {
+      await apiPost(`/api/v1/catalog/${encodeURIComponent(id)}/confirm`, {});
+      const tr = document.getElementById(`crow-${id}`);
+      if (tr) {
+        const statusTd = tr.querySelectorAll('td')[5];
+        if (statusTd) statusTd.innerHTML = badge('confirmed');
+        const actionsTd = tr.querySelectorAll('td')[6];
+        if (actionsTd) {
+          const confirmBtn = actionsTd.querySelector('.btn-success');
+          if (confirmBtn) confirmBtn.remove();
+        }
+      }
+    } catch (e) { showError(document.getElementById('errors'), 'Confirm failed: ' + e.message); }
+  };
+
+  window.toggleCatalogDetail = async function(id, btn) {
+    const existing = document.getElementById(`cdetail-${id}`);
+    if (existing) { existing.remove(); btn.textContent = 'Detail'; return; }
+    btn.textContent = 'Close';
+    const tr = document.getElementById(`crow-${id}`);
+    const detailTr = document.createElement('tr');
+    detailTr.id = `cdetail-${id}`;
+    detailTr.className = 'detail-row';
+    detailTr.innerHTML = `<td colspan="7"><div style="padding:.5rem;font-size:.85rem">Loading…</div></td>`;
+    tr.after(detailTr);
+    try {
+      const [entry, docs, rels] = await Promise.all([
+        apiGet(`/api/v1/catalog/${encodeURIComponent(id)}`),
+        apiGet(`/api/v1/catalog/${encodeURIComponent(id)}/documents`).catch(() => ({ documents: [] })),
+        apiGet(`/api/v1/catalog/${encodeURIComponent(id)}/relationships`).catch(() => ({ relationships: [] })),
+      ]);
+      const aliases = (entry.aliases ?? []).join(', ') || '—';
+      const docCount = (docs.documents ?? []).length;
+      const relCount = (rels.relationships ?? []).length;
+      detailTr.querySelector('td').innerHTML = `
+        <div style="padding:.5rem;font-size:.85rem">
+          <strong>Aliases:</strong> ${escHtml(aliases)}<br/>
+          <strong>Documents:</strong> ${docCount}
+          <strong style="margin-left:1rem">Relationships:</strong> ${relCount}
+          ${rels.relationships?.slice(0,5).map(r =>
+            `<div style="margin-left:1rem;color:#6c757d">${escHtml(JSON.stringify(r))}</div>`
+          ).join('') ?? ''}
+        </div>`;
+    } catch (e) {
+      detailTr.querySelector('td').innerHTML =
+        `<div class="error-msg" style="margin:.5rem">Detail load failed: ${escHtml(e.message)}</div>`;
+    }
+  };
+
+  // Search debounce
+  document.getElementById('search-input').addEventListener('input', e => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      searchQuery = e.target.value.trim();
+      currentPage = 1;
+      loadPage(1, false);
+    }, 300);
+  });
+
+  document.getElementById('type-filter').addEventListener('change', e => {
+    typeFilter = e.target.value;
+    currentPage = 1;
+    loadPage(1, false);
+  });
+
+  document.getElementById('load-more-btn').addEventListener('click', () => {
+    currentPage++;
+    loadPage(currentPage, true);
+  });
+
+  loadPage(1, false);
+})();
+</script>
+{% endblock %}

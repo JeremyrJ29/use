@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}USE{% endblock %}</title>
+  <link rel="stylesheet" href="/static/use.css" />
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-brand">USE</div>
+    <ul class="nav-links">
+      <li><a href="/ui/">Dashboard</a></li>
+      <li><a href="/ui/review">Review Queue</a></li>
+      <li><a href="/ui/catalog">Catalog</a></li>
+      <li><a href="/ui/patterns">Patterns</a></li>
+      <li><a href="/ui/anomalies">Anomalies</a></li>
+    </ul>
+  </nav>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/use.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

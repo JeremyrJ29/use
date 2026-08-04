@@ -12,10 +12,12 @@ from use.api.v1 import (
     health,
 )
 from use.api.v1.auth_dev import router as auth_router
+from use.api.v1 import ui as ui_router
 
 api_router = APIRouter()
 
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+api_router.include_router(ui_router.router, tags=["ui"])
 api_router.include_router(ingest.router, prefix="/api/v1", tags=["ingestion"])
 api_router.include_router(documents.router, prefix="/api/v1", tags=["documents"])
 api_router.include_router(catalog.router, prefix="/api/v1", tags=["catalog"])

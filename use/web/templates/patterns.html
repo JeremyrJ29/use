@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}USE — Patterns{% endblock %}
+
+{% block content %}
+<h1>Patterns</h1>
+
+<div id="errors"></div>
+
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
+  <div class="tabs" style="margin:0">
+    <button class="tab-btn active" id="tab-cooc" onclick="showTab('cooc')">Co-occurrence</button>
+    <button class="tab-btn" id="tab-seq" onclick="showTab('seq')">Sequences</button>
+  </div>
+  <button class="btn btn-primary btn-sm" id="analyze-btn" onclick="runAnalysis()">Run Analysis</button>
+  <span id="analyze-result" style="font-size:.85rem;color:#6c757d"></span>
+</div>
+
+<!-- Co-occurrence -->
+<div id="pane-cooc">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Entity A</th><th>Entity B</th><th>PMI Score</th><th>Support Count</th></tr></thead>
+      <tbody id="cooc-body"><tr><td colspan="4" class="empty-msg">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Sequences -->
+<div id="pane-seq" style="display:none">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Sequence Pattern</th><th>Support Count</th></tr></thead>
+      <tbody id="seq-body"><tr><td colspan="2" class="empty-msg">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(tab) {
+  document.getElementById('pane-cooc').style.display = tab === 'cooc' ? '' : 'none';
+  document.getElementById('pane-seq').style.display  = tab === 'seq'  ? '' : 'none';
+  document.getElementById('tab-cooc').classList.toggle('active', tab === 'cooc');
+  document.getElementById('tab-seq').classList.toggle('active', tab === 'seq');
+}
+
+async function loadCooc() {
+  const tbody = document.getElementById('cooc-body');
+  try {
+    const data = await apiGet('/api/v1/patterns/co-occurrence');
+    const items = data.items ?? data.co_occurrences ?? data.patterns ?? (Array.isArray(data) ? data : []);
+    if (!items.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-msg">No co-occurrence data yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = items.map(p => `
+      <tr>
+        <td>${escHtml(p.entity_a ?? p.a ?? '—')}</td>
+        <td>${escHtml(p.entity_b ?? p.b ?? '—')}</td>
+        <td>${typeof p.pmi_score === 'number' ? p.pmi_score.toFixed(4) : (p.pmi ?? '—')}</td>
+        <td>${p.support_count ?? p.support ?? '—'}</td>
+      </tr>`).join('');
+  } catch (e) {
+    showError(document.getElementById('errors'), 'Co-occurrence API: ' + e.message);
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-msg">Failed to load.</td></tr>`;
+  }
+}
+
+async function loadSeq() {
+  const tbody = document.getElementById('seq-body');
+  try {
+    const data = await apiGet('/api/v1/patterns/sequences');
+    const items = data.items ?? data.sequences ?? data.patterns ?? (Array.isArray(data) ? data : []);
+    if (!items.length) {
+      tbody.innerHTML = `<tr><td colspan="2" class="empty-msg">No sequence data yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = items.map(p => `
+      <tr>
+        <td style="word-break:break-all">${escHtml(JSON.stringify(p.pattern ?? p.sequence ?? p))}</td>
+        <td>${p.support_count ?? p.support ?? '—'}</td>
+      </tr>`).join('');
+  } catch (e) {
+    showError(document.getElementById('errors'), 'Sequences API: ' + e.message);
+    tbody.innerHTML = `<tr><td colspan="2" class="empty-msg">Failed to load.</td></tr>`;
+  }
+}
+
+window.runAnalysis = async function () {
+  const btn = document.getElementById('analyze-btn');
+  const result = document.getElementById('analyze-result');
+  btn.disabled = true;
+  result.textContent = 'Running…';
+  try {
+    const data = await apiPost('/api/v1/patterns/analyze', {});
+    const summary = data.summary ?? data.message ?? JSON.stringify(data);
+    result.textContent = '✓ ' + summary;
+    await loadCooc();
+    await loadSeq();
+  } catch (e) {
+    result.textContent = '✗ ' + e.message;
+    showError(document.getElementById('errors'), 'Analysis failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadCooc();
+loadSeq();
+</script>
+{% endblock %}
